@@ -71,7 +71,7 @@ export default function PromptGenerator() {
                     if (errData.detail) {
                         errMessage = errData.detail;
                     }
-                } catch (_) { }
+                } catch { }
                 throw new Error(errMessage);
             }
 
