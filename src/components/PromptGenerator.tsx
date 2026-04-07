@@ -19,7 +19,7 @@ const PLATFORMS = ['Midjourney', 'DALL·E', 'Stable Diffusion', 'Universal'];
 const COMPLEXITY_LEVELS = ['SIMPLE', 'DETAILED', 'ULTRA-DETAILED'];
 
 export default function PromptGenerator() {
-    const { data: session, status } = useSession();
+    const { status } = useSession();
     const router = useRouter();
 
     useEffect(() => {
