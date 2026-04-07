@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSession, signOut } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 
 const ART_STYLES = [
     'Realistic / Photographic', 'Fantasy & Surreal', 'Analog Photography',
@@ -17,6 +19,15 @@ const PLATFORMS = ['Midjourney', 'DALL·E', 'Stable Diffusion', 'Universal'];
 const COMPLEXITY_LEVELS = ['SIMPLE', 'DETAILED', 'ULTRA-DETAILED'];
 
 export default function PromptGenerator() {
+    const { data: session, status } = useSession();
+    const router = useRouter();
+
+    useEffect(() => {
+        if (status === 'unauthenticated') {
+            router.push('/login');
+        }
+    }, [status, router]);
+
     const [styles, setStyles] = useState<string[]>([]);
     const [moods, setMoods] = useState<string[]>(['Cinematic']);
     const [platform, setPlatform] = useState<string>('Midjourney');
@@ -100,10 +111,19 @@ export default function PromptGenerator() {
         setTimeout(() => setCopied(false), 2000);
     };
 
+    if (status === 'loading' || status === 'unauthenticated') {
+        return (
+            <div className="w-full max-w-4xl mx-auto flex items-center justify-center min-h-[50vh]">
+                <span className="spinner w-8 h-8 rounded-full border-2 border-gold border-t-transparent"></span>
+            </div>
+        );
+    }
+
     return (
-        <div className="w-full max-w-4xl mx-auto flex flex-col gap-8 duration-500 ease-out opacity-100 transition-opacity">
+        <div className="w-full max-w-4xl mx-auto flex flex-col gap-8 duration-500 ease-out opacity-100 transition-opacity relative">
             {/* Header */}
-            <div className="text-center space-y-4 mb-8">
+            <div className="text-center space-y-4 mb-8 pt-6 relative">
+                <button onClick={() => signOut()} className="absolute top-0 right-0 text-[10px] tracking-widest text-muted hover:text-white transition-colors border border-border px-3 py-1 rounded-sm">SIGN OUT</button>
                 <p className="text-xs tracking-widest text-muted uppercase font-sans">AI Art Prompt Creator</p>
                 <h1 className="text-5xl md:text-7xl font-serif text-white tracking-tight">ArtSpark</h1>
                 <div className="w-16 h-[1px] bg-gold mx-auto opacity-50 mt-4"></div>
