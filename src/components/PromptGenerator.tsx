@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 
@@ -34,6 +34,11 @@ export default function PromptGenerator() {
     const [subject, setSubject] = useState<string>('');
     const [complexity, setComplexity] = useState<string>('SIMPLE');
 
+    const [mode, setMode] = useState<'prompt' | 'image'>('prompt');
+    const [inputImage, setInputImage] = useState<string | null>(null);
+    const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     const [prompt, setPrompt] = useState<string>('');
     const [model, setModel] = useState<string>('');
     const [loading, setLoading] = useState<boolean>(false);
@@ -49,9 +54,20 @@ export default function PromptGenerator() {
         }
     };
 
-    const generatePrompt = async () => {
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setInputImage(reader.result as string);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleGenerate = async () => {
         if (!subject.trim()) {
-            setError('Please provide a subject for the artwork.');
+            setError('Please provide a subject or description.');
             return;
         }
 
@@ -61,39 +77,54 @@ export default function PromptGenerator() {
 
         try {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-            const response = await fetch(`${apiUrl}/generate`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    styles,
-                    moods,
-                    platform,
-                    subject,
-                    complexity,
-                }),
-            });
+            
+            if (mode === 'prompt') {
+                const response = await fetch(`${apiUrl}/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        styles,
+                        moods,
+                        platform,
+                        subject,
+                        complexity,
+                        image_base64: inputImage
+                    }),
+                });
 
-            if (!response.ok) {
-                let errMessage = 'Failed to generate prompt. Please check backend connection.';
-                try {
-                    const errData = await response.json();
-                    if (errData.detail) {
-                        errMessage = errData.detail;
-                    }
-                } catch { }
-                throw new Error(errMessage);
+                if (!response.ok) {
+                    let errMessage = 'Failed to generate prompt. Please check backend connection.';
+                    try { const errData = await response.json(); if(errData.detail) errMessage = errData.detail; } catch {}
+                    throw new Error(errMessage);
+                }
+
+                const data = await response.json();
+                setPrompt(data.prompt);
+                setModel(data.model);
+                setHistory(prev => {
+                    const newHistory = [data.prompt, ...prev];
+                    return newHistory.slice(0, 10);
+                });
+            } else {
+                const fullPrompt = `${subject}. Styles: ${styles.join(', ')}. Moods: ${moods.join(', ')}`;
+                const response = await fetch(`${apiUrl}/generate/image`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: fullPrompt,
+                        aspect_ratio: "1:1"
+                    }),
+                });
+
+                if (!response.ok) {
+                    let errMessage = 'Failed to generate image.';
+                    try { const errData = await response.json(); if(errData.detail) errMessage = errData.detail; } catch {}
+                    throw new Error(errMessage);
+                }
+
+                const data = await response.json();
+                setGeneratedImage(`data:image/jpeg;base64,${data.image_base64}`);
             }
-
-            const data = await response.json();
-            setPrompt(data.prompt);
-            setModel(data.model);
-
-            setHistory(prev => {
-                const newHistory = [data.prompt, ...prev];
-                return newHistory.slice(0, 10); // Keep last 10
-            });
         } catch (err: unknown) {
             if (err instanceof Error) {
                 setError(err.message);
@@ -122,11 +153,29 @@ export default function PromptGenerator() {
     return (
         <div className="w-full max-w-4xl mx-auto flex flex-col gap-8 duration-500 ease-out opacity-100 transition-opacity relative">
             {/* Header */}
-            <div className="text-center space-y-4 mb-8 pt-6 relative">
+            <div className="text-center space-y-4 mb-4 pt-6 relative">
                 <button onClick={() => signOut()} className="absolute top-0 right-0 text-[10px] tracking-widest text-muted hover:text-white transition-colors border border-border px-3 py-1 rounded-sm">SIGN OUT</button>
                 <p className="text-xs tracking-widest text-muted uppercase font-sans">AI Art Prompt Creator</p>
                 <h1 className="text-5xl md:text-7xl font-serif text-white tracking-tight">ArtSpark</h1>
                 <div className="w-16 h-[1px] bg-gold mx-auto opacity-50 mt-4"></div>
+            </div>
+
+            {/* Mode Toggle */}
+            <div className="flex justify-center mb-6">
+                <div className="flex bg-accent rounded-sm border border-border p-1 space-x-1">
+                    <button 
+                        onClick={() => setMode('prompt')} 
+                        className={`text-xs px-6 py-2.5 rounded-sm transition-all tracking-widest uppercase ${mode === 'prompt' ? 'bg-gold text-black font-semibold' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+                    >
+                        ✨ Prompt Alchemy
+                    </button>
+                    <button 
+                        onClick={() => setMode('image')} 
+                        className={`text-xs px-6 py-2.5 rounded-sm transition-all tracking-widest uppercase ${mode === 'image' ? 'bg-gold text-black font-semibold' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+                    >
+                        🖼️ Image Generation
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -180,9 +229,35 @@ export default function PromptGenerator() {
                         <textarea
                             value={subject}
                             onChange={(e) => setSubject(e.target.value)}
-                            placeholder="Describe your subject... (e.g. A vintage pocket watch resting on an old map)"
+                            placeholder={mode === 'prompt' ? "Describe your subject... OR upload an image to reverse-engineer it!" : "Describe exactly what you want to see generated..."}
                             className="w-full bg-accent text-white border border-border p-4 h-32 mt-2 focus:ring-1 focus:ring-gold focus:border-gold outline-none transition-all resize-none font-serif text-lg leading-relaxed rounded-sm"
                         />
+                        {mode === 'prompt' && (
+                            <div className="absolute right-4 bottom-4 flex items-center gap-2">
+                                {inputImage && (
+                                    <div className="relative w-10 h-10 border border-gold rounded-sm overflow-hidden group">
+                                        <img src={inputImage} alt="Reference" className="w-full h-full object-cover" />
+                                        <button onClick={() => setInputImage(null)} className="absolute inset-0 bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-xs font-sans">
+                                            ✕
+                                        </button>
+                                    </div>
+                                )}
+                                <input 
+                                    type="file" 
+                                    accept="image/*" 
+                                    ref={fileInputRef} 
+                                    onChange={handleImageUpload} 
+                                    className="hidden" 
+                                />
+                                <button 
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="w-10 h-10 flex items-center justify-center bg-surface border border-border text-gray-400 hover:text-gold hover:border-gold transition-colors rounded-sm"
+                                    title="Upload Reference Image"
+                                >
+                                    📷
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -200,11 +275,11 @@ export default function PromptGenerator() {
                     </div>
 
                     <button
-                        onClick={generatePrompt}
+                        onClick={handleGenerate}
                         disabled={loading}
                         className="w-full md:w-48 bg-gold hover:bg-yellow-600 disabled:opacity-50 disabled:hover:bg-gold text-black px-6 py-3 font-medium text-sm tracking-wide rounded-sm transition-all flex justify-center items-center h-12 outline-none"
                     >
-                        {loading ? <span className="spinner w-4 h-4 rounded-full border-2 border-black border-t-transparent"></span> : 'GENERATE'}
+                        {loading ? <span className="spinner w-4 h-4 rounded-full border-2 border-black border-t-transparent"></span> : (mode === 'prompt' ? 'GENERATE PROMPT' : 'GENERATE IMAGE')}
                     </button>
                 </div>
             </section>
@@ -217,8 +292,8 @@ export default function PromptGenerator() {
             )}
 
             {/* Result Output */}
-            {prompt && (
-                <section className="bg-surface p-6 rounded-sm border border-gold/30 mt-4 relative">
+            {mode === 'prompt' && prompt && (
+                <section className="bg-surface p-6 rounded-sm border border-gold/30 mt-4 relative animate-fade-in">
                     <h2 className="text-xs tracking-widest uppercase text-gold mb-4 font-sans">Generated Prompt</h2>
 
                     <p className="font-mono text-sm leading-loose text-gray-200 break-words whitespace-pre-wrap">
@@ -229,7 +304,7 @@ export default function PromptGenerator() {
                         <span className="text-xs text-muted font-sans">Model: {model}</span>
                         <div className="space-x-3">
                             <button
-                                onClick={generatePrompt}
+                                onClick={handleGenerate}
                                 className="text-xs px-4 py-2 border border-border text-gray-300 hover:text-white hover:border-gray-400 transition-colors rounded-sm tracking-widest"
                             >
                                 REGENERATE
@@ -245,8 +320,25 @@ export default function PromptGenerator() {
                 </section>
             )}
 
+            {mode === 'image' && generatedImage && (
+                <section className="bg-surface p-6 rounded-sm border border-gold/30 mt-4 text-center animate-fade-in">
+                    <h2 className="text-xs tracking-widest uppercase text-gold mb-4 font-sans">Generated Image</h2>
+                    <div className="w-full max-w-2xl mx-auto rounded-sm overflow-hidden shadow-2xl border border-border bg-black min-h-[300px] flex items-center justify-center">
+                        <img src={generatedImage} alt="Generated Art" className="w-full h-auto object-contain" />
+                    </div>
+                    <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-4">
+                        <button onClick={handleGenerate} className="text-xs px-8 py-4 border border-border text-gray-300 hover:text-white hover:border-gray-400 transition-colors rounded-sm tracking-widest">
+                            REGENERATE
+                        </button>
+                        <a href={generatedImage} download="artspark_generation.jpg" className="text-xs px-8 py-4 bg-gold text-black transition-colors rounded-sm tracking-widest hover:bg-yellow-600 font-semibold shadow-[0_0_15px_rgba(212,175,55,0.3)]">
+                            ⬇ DOWNLOAD HD IMAGE
+                        </a>
+                    </div>
+                </section>
+            )}
+
             {/* History */}
-            {history.length > 0 && (
+            {mode === 'prompt' && history.length > 0 && (
                 <section className="mt-8 space-y-3">
                     <h3 className="text-xs tracking-widest text-muted uppercase font-sans">Recent Prompts</h3>
                     <div className="space-y-2">

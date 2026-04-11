@@ -25,6 +25,12 @@ class GenerateRequest(BaseModel):
     platform: str = "Universal"
     subject: Optional[str] = None
     complexity: str
+    image_base64: Optional[str] = None
+    mime_type: Optional[str] = "image/jpeg"
+
+class ImageGenerateRequest(BaseModel):
+    prompt: str
+    aspect_ratio: Optional[str] = "1:1"
 
 @app.get("/")
 def home():
@@ -45,11 +51,20 @@ def generate_prompt(req: GenerateRequest):
 
     user_content = f"Subject: {req.subject}\nStyles: {', '.join(req.styles)}\nMoods: {', '.join(req.moods)}\nPlatform: {req.platform}"
 
+    contents = []
+    if req.image_base64:
+        import base64
+        image_bytes = base64.b64decode(req.image_base64.split(",")[1] if "," in req.image_base64 else req.image_base64)
+        contents.append(
+            types.Part.from_bytes(data=image_bytes, mime_type=req.mime_type)
+        )
+    contents.append(user_content)
+
     try:
         client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
         response = client.models.generate_content(
             model='gemini-2.5-flash',
-            contents=user_content,
+            contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 temperature=0.9,
@@ -57,5 +72,29 @@ def generate_prompt(req: GenerateRequest):
             )
         )
         return {"prompt": response.text.strip(), "model": "gemini-2.5-flash"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/generate/image")
+def generate_image(req: ImageGenerateRequest):
+    try:
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+        result = client.models.generate_images(
+            model='imagen-3.0-generate-001',
+            prompt=req.prompt,
+            config=types.GenerateImagesConfig(
+                number_of_images=1,
+                output_mime_type="image/jpeg",
+                aspect_ratio=req.aspect_ratio
+            )
+        )
+        if not result.generated_images:
+            raise HTTPException(status_code=500, detail="No image generated")
+            
+        import base64
+        image_bytes = result.generated_images[0].image.image_bytes
+        b64_string = base64.b64encode(image_bytes).decode('utf-8')
+        
+        return {"image_base64": b64_string, "mime_type": "image/jpeg"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
