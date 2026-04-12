@@ -78,24 +78,85 @@ def generate_prompt(req: GenerateRequest):
 
 @app.post("/generate/image")
 async def generate_image(req: ImageGenerateRequest):
+    freepik_key = os.environ.get("FREEPIK_API_KEY")
+    
+    # Try Freepik first if key is available
+    if freepik_key:
+        try:
+            headers = {
+                "x-freepik-api-key": freepik_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
+            # Map aspect ratio
+            ar_map = {"1:1": "square", "16:9": "widescreen_16_9", "4:3": "standard_4_3", "3:2": "classic_3_2"}
+            freepik_ar = ar_map.get(req.aspect_ratio, "square")
+
+            payload = {
+                "prompt": req.prompt,
+                "aspect_ratio": freepik_ar,
+                "num_images": 1,
+                "image": {"size": "large"}
+            }
+
+            async with httpx.AsyncClient() as client:
+                # 1. Start the task
+                resp = await client.post("https://api.freepik.com/v1/ai/text-to-image", json=payload, headers=headers, timeout=60.0)
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    image_url = None
+                    
+                    # Some endpoints return data directly or a task object
+                    if "data" in data:
+                        inner_data = data["data"]
+                        
+                        # Case A: Direct URL or Base64 (Rare for heavy models)
+                        if isinstance(inner_data, list) and len(inner_data) > 0:
+                            image_url = inner_data[0].get("url")
+                        
+                        # Case B: Task ID (Common for Flux/Heavy models)
+                        elif "task_id" in inner_data:
+                            task_id = inner_data["task_id"]
+                            import asyncio
+                            # Poll for completion (up to 45 seconds)
+                            for _ in range(15): 
+                                await asyncio.sleep(3)
+                                task_resp = await client.get(f"https://api.freepik.com/v1/ai/tasks/{task_id}", headers=headers)
+                                if task_resp.status_code == 200:
+                                    task_data = task_resp.json().get("data", {})
+                                    if task_data.get("status") == "COMPLETED":
+                                        result = task_data.get("result", {})
+                                        if "images" in result and len(result["images"]) > 0:
+                                            image_url = result["images"][0].get("url")
+                                            break
+                                    elif task_data.get("status") == "FAILED":
+                                        break
+                    
+                    if image_url:
+                        # Fetch the final image and convert to Base64
+                        final_img_resp = await client.get(image_url)
+                        if final_img_resp.status_code == 200:
+                            import base64
+                            b64 = base64.b64encode(final_img_resp.content).decode('utf-8')
+                            return {"image_base64": b64, "mime_type": "image/jpeg", "source": "freepik"}
+
+        except Exception as e:
+            print(f"Freepik failed: {str(e)}") # Fallback to Pollinations below
+
+    # Fallback to Pollinations.ai (Free & Reliable)
     try:
-        # We use Pollinations.ai for a FREE, high-quality image generation experience
         import urllib.parse
         encoded_prompt = urllib.parse.quote(req.prompt)
-        
-        # We use the flux model for better quality, and hide logos
         image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&private=true&enhance=false&model=flux"
         
         async with httpx.AsyncClient() as client:
             response = await client.get(image_url, timeout=60.0)
-            if response.status_code != 200:
-                raise HTTPException(status_code=500, detail="Failed to reach image generation service")
-                
-            image_bytes = response.content
+            if response.status_code == 200:
+                import base64
+                b64_string = base64.b64encode(response.content).decode('utf-8')
+                return {"image_base64": b64_string, "mime_type": "image/jpeg", "source": "pollinations"}
             
-        import base64
-        b64_string = base64.b64encode(image_bytes).decode('utf-8')
-        
-        return {"image_base64": b64_string, "mime_type": "image/jpeg"}
+        raise HTTPException(status_code=500, detail="Failed to generate image with any service")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
