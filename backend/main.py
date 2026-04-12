@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import os
+import httpx
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -76,23 +77,23 @@ def generate_prompt(req: GenerateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate/image")
-def generate_image(req: ImageGenerateRequest):
+async def generate_image(req: ImageGenerateRequest):
     try:
-        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-        result = client.models.generate_images(
-            model='imagen-4.0-generate-001',
-            prompt=req.prompt,
-            config=types.GenerateImagesConfig(
-                number_of_images=1,
-                output_mime_type="image/jpeg",
-                aspect_ratio=req.aspect_ratio
-            )
-        )
-        if not result.generated_images:
-            raise HTTPException(status_code=500, detail="No image generated")
+        # We use Pollinations.ai for a FREE, high-quality image generation experience
+        import urllib.parse
+        encoded_prompt = urllib.parse.quote(req.prompt)
+        
+        # We use the flux model for better quality, and hide logos
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&private=true&enhance=false&model=flux"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(image_url, timeout=60.0)
+            if response.status_code != 200:
+                raise HTTPException(status_code=500, detail="Failed to reach image generation service")
+                
+            image_bytes = response.content
             
         import base64
-        image_bytes = result.generated_images[0].image.image_bytes
         b64_string = base64.b64encode(image_bytes).decode('utf-8')
         
         return {"image_base64": b64_string, "mime_type": "image/jpeg"}
