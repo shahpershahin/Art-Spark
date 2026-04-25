@@ -65,8 +65,11 @@ export default function PromptGenerator() {
         }
     };
 
-    const handleGenerate = async () => {
-        if (!subject.trim()) {
+    const handleGenerate = async (overrideSubject?: string, overrideMode?: 'prompt' | 'image') => {
+        const activeMode = overrideMode || mode;
+        const activeSubject = overrideSubject || subject;
+
+        if (!activeSubject.trim()) {
             setError('Please provide a subject or description.');
             return;
         }
@@ -78,7 +81,7 @@ export default function PromptGenerator() {
         try {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
             
-            if (mode === 'prompt') {
+            if (activeMode === 'prompt') {
                 const response = await fetch(`${apiUrl}/generate`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -86,7 +89,7 @@ export default function PromptGenerator() {
                         styles,
                         moods,
                         platform,
-                        subject,
+                        subject: activeSubject,
                         complexity,
                         image_base64: inputImage
                     }),
@@ -106,7 +109,7 @@ export default function PromptGenerator() {
                     return newHistory.slice(0, 10);
                 });
             } else {
-                const fullPrompt = `${subject}. Styles: ${styles.join(', ')}. Moods: ${moods.join(', ')}`;
+                const fullPrompt = `${activeSubject}. Styles: ${styles.join(', ')}. Moods: ${moods.join(', ')}`;
                 const response = await fetch(`${apiUrl}/generate/image`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -300,18 +303,28 @@ export default function PromptGenerator() {
                         {prompt}
                     </p>
 
-                    <div className="flex items-center justify-between mt-6 pt-4 border-t border-border">
+                    <div className="flex flex-wrap items-center justify-between mt-6 pt-4 border-t border-border gap-4">
                         <span className="text-xs text-muted font-sans">Model: {model}</span>
-                        <div className="space-x-3">
+                        <div className="flex flex-wrap gap-3">
                             <button
-                                onClick={handleGenerate}
+                                onClick={() => {
+                                    setMode('image');
+                                    setSubject(prompt);
+                                    handleGenerate(prompt, 'image');
+                                }}
+                                className="text-xs px-4 py-2 bg-gold/10 border border-gold text-gold hover:bg-gold hover:text-black transition-all rounded-sm tracking-widest font-semibold"
+                            >
+                                🎨 GENERATE IMAGE
+                            </button>
+                            <button
+                                onClick={() => handleGenerate()}
                                 className="text-xs px-4 py-2 border border-border text-gray-300 hover:text-white hover:border-gray-400 transition-colors rounded-sm tracking-widest"
                             >
                                 REGENERATE
                             </button>
                             <button
                                 onClick={copyToClipboard}
-                                className={`text-xs px-4 py-2 border transition-colors rounded-sm tracking-widest ${copied ? 'bg-green-800 border-green-800 text-white' : 'border-gold text-gold hover:bg-gold hover:text-black'}`}
+                                className={`text-xs px-4 py-2 border transition-colors rounded-sm tracking-widest ${copied ? 'bg-green-800 border-green-800 text-white' : 'border-gold/50 text-gold/80 hover:border-gold hover:text-gold'}`}
                             >
                                 {copied ? '✓ COPIED' : 'COPY'}
                             </button>
@@ -326,11 +339,20 @@ export default function PromptGenerator() {
                     <div className="w-full max-w-2xl mx-auto rounded-sm overflow-hidden shadow-2xl border border-border bg-black min-h-[300px] flex items-center justify-center">
                         <img src={generatedImage} alt="Generated Art" className="w-full h-auto object-contain" />
                     </div>
-                    <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-4">
-                        <button onClick={handleGenerate} className="text-xs px-8 py-4 border border-border text-gray-300 hover:text-white hover:border-gray-400 transition-colors rounded-sm tracking-widest">
+                    <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
+                        <button 
+                            onClick={() => {
+                                setMode('prompt');
+                                setPrompt(''); // Clear current prompt result so it doesn't show old one
+                            }} 
+                            className="text-xs px-8 py-4 border border-gold/50 text-gold hover:text-white hover:border-gold transition-colors rounded-sm tracking-widest uppercase font-medium"
+                        >
+                            ✨ Refine Prompt
+                        </button>
+                        <button onClick={() => handleGenerate()} className="text-xs px-8 py-4 border border-border text-gray-300 hover:text-white hover:border-gray-400 transition-colors rounded-sm tracking-widest uppercase">
                             REGENERATE
                         </button>
-                        <a href={generatedImage} download="artspark_generation.jpg" className="text-xs px-8 py-4 bg-gold text-black transition-colors rounded-sm tracking-widest hover:bg-yellow-600 font-semibold shadow-[0_0_15px_rgba(212,175,55,0.3)]">
+                        <a href={generatedImage} download="artspark_generation.jpg" className="text-xs px-8 py-4 bg-gold text-black transition-colors rounded-sm tracking-widest hover:bg-yellow-600 font-semibold shadow-[0_0_15px_rgba(212,175,55,0.3)] uppercase">
                             ⬇ DOWNLOAD HD IMAGE
                         </a>
                     </div>
