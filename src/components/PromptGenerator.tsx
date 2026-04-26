@@ -278,7 +278,7 @@ export default function PromptGenerator() {
                     </div>
 
                     <button
-                        onClick={handleGenerate}
+                        onClick={() => handleGenerate()}
                         disabled={loading}
                         className="w-full md:w-48 bg-gold hover:bg-yellow-600 disabled:opacity-50 disabled:hover:bg-gold text-black px-6 py-3 font-medium text-sm tracking-wide rounded-sm transition-all flex justify-center items-center h-12 outline-none"
                     >
