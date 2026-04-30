@@ -18,6 +18,16 @@ const MOODS = [
 const PLATFORMS = ['Midjourney', 'DALL·E', 'Stable Diffusion', 'Universal'];
 const COMPLEXITY_LEVELS = ['SIMPLE', 'DETAILED', 'ULTRA-DETAILED'];
 
+const CHAOS_SUBJECTS = [
+    'A cyberpunk samurai eating noodles',
+    'A Victorian lady riding a T-Rex',
+    'An astronaut discovering a field of giant glowing mushrooms',
+    'A toaster possessed by an ancient demon',
+    'A majestic city built entirely out of glass on clouds',
+    'A medieval knight in a modern grocery store',
+    'A mecha-cat fighting a laser-shark'
+];
+
 export default function PromptGenerator() {
     const { status } = useSession();
     const router = useRouter();
@@ -45,6 +55,11 @@ export default function PromptGenerator() {
     const [error, setError] = useState<string>('');
     const [copied, setCopied] = useState<boolean>(false);
     const [history, setHistory] = useState<string[]>([]);
+    
+    // Critique State
+    const [critique, setCritique] = useState<string>('');
+    const [critiqueLoading, setCritiqueLoading] = useState<boolean>(false);
+    const [critiquePersonality, setCritiquePersonality] = useState<string>('Snobby Curator');
 
     const toggleSelection = (array: string[], setArray: React.Dispatch<React.SetStateAction<string[]>>, item: string) => {
         if (array.includes(item)) {
@@ -63,6 +78,22 @@ export default function PromptGenerator() {
             };
             reader.readAsDataURL(file);
         }
+    };
+
+    const handleChaos = () => {
+        const randomSubject = CHAOS_SUBJECTS[Math.floor(Math.random() * CHAOS_SUBJECTS.length)];
+        const randomStyle = ART_STYLES[Math.floor(Math.random() * ART_STYLES.length)];
+        const randomMood = MOODS[Math.floor(Math.random() * MOODS.length)];
+        
+        setSubject(randomSubject);
+        setStyles([randomStyle]);
+        setMoods([randomMood]);
+        setComplexity('ULTRA-DETAILED');
+        
+        // Use timeout to allow state to settle before generation
+        setTimeout(() => {
+            handleGenerate(randomSubject, mode);
+        }, 100);
     };
 
     const handleGenerate = async (overrideSubject?: string, overrideMode?: 'prompt' | 'image') => {
@@ -136,6 +167,31 @@ export default function PromptGenerator() {
             }
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleCritique = async () => {
+        if (!generatedImage) return;
+        setCritiqueLoading(true);
+        setCritique('');
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const response = await fetch(`${apiUrl}/critique`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    image_base64: generatedImage,
+                    personality: critiquePersonality
+                }),
+            });
+            if (!response.ok) throw new Error('Failed to get critique');
+            const data = await response.json();
+            setCritique(data.critique);
+        } catch (err) {
+            console.error(err);
+            setCritique("The critic refused to look at this piece due to a server error.");
+        } finally {
+            setCritiqueLoading(false);
         }
     };
 
@@ -277,13 +333,23 @@ export default function PromptGenerator() {
                         ))}
                     </div>
 
-                    <button
-                        onClick={() => handleGenerate()}
-                        disabled={loading}
-                        className="w-full md:w-48 bg-gold hover:bg-yellow-600 disabled:opacity-50 disabled:hover:bg-gold text-black px-6 py-3 font-medium text-sm tracking-wide rounded-sm transition-all flex justify-center items-center h-12 outline-none"
-                    >
-                        {loading ? <span className="spinner w-4 h-4 rounded-full border-2 border-black border-t-transparent"></span> : (mode === 'prompt' ? 'GENERATE PROMPT' : 'GENERATE IMAGE')}
-                    </button>
+                    <div className="flex gap-4 w-full md:w-auto">
+                        <button
+                            onClick={handleChaos}
+                            disabled={loading}
+                            className="w-full md:w-48 border border-purple-500/50 hover:border-purple-500 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 disabled:opacity-50 px-6 py-3 font-medium text-sm tracking-wide rounded-sm transition-all flex justify-center items-center h-12 outline-none group"
+                            title="Randomize everything and generate!"
+                        >
+                            <span className="group-hover:animate-spin mr-2">🎲</span> CHAOS ROULETTE
+                        </button>
+                        <button
+                            onClick={() => handleGenerate()}
+                            disabled={loading}
+                            className="w-full md:w-48 bg-gold hover:bg-yellow-600 disabled:opacity-50 disabled:hover:bg-gold text-black px-6 py-3 font-medium text-sm tracking-wide rounded-sm transition-all flex justify-center items-center h-12 outline-none"
+                        >
+                            {loading ? <span className="spinner w-4 h-4 rounded-full border-2 border-black border-t-transparent"></span> : (mode === 'prompt' ? 'GENERATE PROMPT' : 'GENERATE IMAGE')}
+                        </button>
+                    </div>
                 </div>
             </section>
 
@@ -355,6 +421,34 @@ export default function PromptGenerator() {
                         <a href={generatedImage} download="artspark_generation.jpg" className="text-xs px-8 py-4 bg-gold text-black transition-colors rounded-sm tracking-widest hover:bg-yellow-600 font-semibold shadow-[0_0_15px_rgba(212,175,55,0.3)] uppercase">
                             ⬇ DOWNLOAD HD IMAGE
                         </a>
+                    </div>
+
+                    {/* Art Critic Section */}
+                    <div className="mt-8 pt-8 border-t border-border">
+                        <h3 className="text-xs tracking-widest uppercase text-muted mb-4 font-sans">🎭 The Art Critic</h3>
+                        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-4">
+                            <select 
+                                value={critiquePersonality}
+                                onChange={(e) => setCritiquePersonality(e.target.value)}
+                                className="bg-accent text-white border border-border px-4 py-3 text-sm rounded-sm outline-none focus:border-gold transition-colors"
+                            >
+                                <option value="Snobby Curator">🍷 Snobby Curator</option>
+                                <option value="Aggressive Roaster">🔥 Aggressive Roaster</option>
+                                <option value="Supportive Bob Ross">🎨 Supportive Bob Ross</option>
+                            </select>
+                            <button 
+                                onClick={handleCritique}
+                                disabled={critiqueLoading}
+                                className="w-full sm:w-auto px-6 py-3 border border-blue-500/50 text-blue-400 hover:bg-blue-500/10 transition-colors rounded-sm text-sm tracking-widest uppercase flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                                {critiqueLoading ? <span className="spinner w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent"></span> : 'Critique My Art'}
+                            </button>
+                        </div>
+                        {critique && (
+                            <div className="bg-black/50 border border-blue-500/30 p-6 rounded-sm max-w-2xl mx-auto animate-fade-in text-left">
+                                <p className="text-gray-300 font-serif leading-relaxed italic text-lg">"{critique}"</p>
+                            </div>
+                        )}
                     </div>
                 </section>
             )}

@@ -33,6 +33,11 @@ class ImageGenerateRequest(BaseModel):
     prompt: str
     aspect_ratio: Optional[str] = "1:1"
 
+class CritiqueRequest(BaseModel):
+    image_base64: str
+    mime_type: Optional[str] = "image/jpeg"
+    personality: str = "Snobby Curator"
+
 @app.get("/")
 def home():
     return {"status": "ok"}
@@ -158,5 +163,41 @@ async def generate_image(req: ImageGenerateRequest):
                 return {"image_base64": b64_string, "mime_type": "image/jpeg", "source": "pollinations"}
             
         raise HTTPException(status_code=500, detail="Failed to generate image with any service")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/critique")
+def critique_image(req: CritiqueRequest):
+    if not req.image_base64:
+        raise HTTPException(status_code=400, detail="Image base64 is required")
+        
+    system_prompt = ""
+    if req.personality == "Snobby Curator":
+        system_prompt = "You are a pretentious, snobby fine-art curator in an avant-garde gallery. Critique this image harshly but with extremely sophisticated vocabulary. Output a single short paragraph."
+    elif req.personality == "Aggressive Roaster":
+        system_prompt = "You are an aggressive internet troll who roasts art. Be funny, sarcastic, and brutally honest about the flaws in this image. Output a single short paragraph."
+    else: # Supportive Bob Ross
+        system_prompt = "You are Bob Ross. You are incredibly supportive, gentle, and positive. Find the 'happy little accidents' in this image and praise it warmly. Output a single short paragraph."
+
+    import base64
+    try:
+        image_data = req.image_base64.split(",")[1] if "," in req.image_base64 else req.image_base64
+        image_bytes = base64.b64decode(image_data)
+        
+        contents = [
+            types.Part.from_bytes(data=image_bytes, mime_type=req.mime_type),
+            "Please critique this piece."
+        ]
+        
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.9,
+            )
+        )
+        return {"critique": response.text.strip(), "personality": req.personality}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
