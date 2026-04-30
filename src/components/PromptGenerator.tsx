@@ -446,7 +446,7 @@ export default function PromptGenerator() {
                         </div>
                         {critique && (
                             <div className="bg-black/50 border border-blue-500/30 p-6 rounded-sm max-w-2xl mx-auto animate-fade-in text-left">
-                                <p className="text-gray-300 font-serif leading-relaxed italic text-lg">"{critique}"</p>
+                                <p className="text-gray-300 font-serif leading-relaxed italic text-lg">&quot;{critique}&quot;</p>
                             </div>
                         )}
                     </div>
