@@ -32,9 +32,33 @@ export default function PromptGenerator() {
     const { status } = useSession();
     const router = useRouter();
 
+    interface HistoryItem {
+        id: number;
+        prompt: string;
+        image_base64: string;
+        created_at: string;
+    }
+
+    const [dbHistory, setDbHistory] = useState<HistoryItem[]>([]);
+
+    const fetchHistory = async () => {
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const res = await fetch(`${apiUrl}/history`);
+            if (res.ok) {
+                const data = await res.json();
+                setDbHistory(data);
+            }
+        } catch (e) {
+            console.error("Failed to fetch history", e);
+        }
+    };
+
     useEffect(() => {
         if (status === 'unauthenticated') {
             router.push('/login');
+        } else if (status === 'authenticated') {
+            fetchHistory();
         }
     }, [status, router]);
 
@@ -61,6 +85,27 @@ export default function PromptGenerator() {
     const [critiqueLoading, setCritiqueLoading] = useState<boolean>(false);
     const [critiquePersonality, setCritiquePersonality] = useState<string>('Snobby Curator');
 
+    // Slot Machine State
+    const [spinning, setSpinning] = useState<boolean>(false);
+    const [displaySubject, setDisplaySubject] = useState<string>('???');
+    const [displayStyle, setDisplayStyle] = useState<string>('???');
+    const [displayMood, setDisplayMood] = useState<string>('???');
+    
+    // Infinite Universe State
+    const [continueLoading, setContinueLoading] = useState<boolean>(false);
+
+    // Evolution Engine State
+    const [mutationPrompt, setMutationPrompt] = useState<string>('');
+    const [mutateLoading, setMutateLoading] = useState<boolean>(false);
+    const [mutatedImage, setMutatedImage] = useState<string | null>(null);
+    const [sliderValue, setSliderValue] = useState<number>(50);
+
+    // Comic Book State
+    const [appMode, setAppMode] = useState<'prompt' | 'comic'>('prompt');
+    const [comicStory, setComicStory] = useState<string>('');
+    const [comicLoading, setComicLoading] = useState<boolean>(false);
+    const [comicPanels, setComicPanels] = useState<{caption: string, image_base64: string}[]>([]);
+
     const toggleSelection = (array: string[], setArray: React.Dispatch<React.SetStateAction<string[]>>, item: string) => {
         if (array.includes(item)) {
             setArray(array.filter(i => i !== item));
@@ -81,19 +126,41 @@ export default function PromptGenerator() {
     };
 
     const handleChaos = () => {
-        const randomSubject = CHAOS_SUBJECTS[Math.floor(Math.random() * CHAOS_SUBJECTS.length)];
-        const randomStyle = ART_STYLES[Math.floor(Math.random() * ART_STYLES.length)];
-        const randomMood = MOODS[Math.floor(Math.random() * MOODS.length)];
+        if (spinning || loading) return;
+        setSpinning(true);
         
-        setSubject(randomSubject);
-        setStyles([randomStyle]);
-        setMoods([randomMood]);
-        setComplexity('ULTRA-DETAILED');
+        let spins = 0;
+        const maxSpins = 20; // 20 frames of animation
         
-        // Use timeout to allow state to settle before generation
-        setTimeout(() => {
-            handleGenerate(randomSubject, mode);
-        }, 100);
+        const spinInterval = setInterval(() => {
+            setDisplaySubject(CHAOS_SUBJECTS[Math.floor(Math.random() * CHAOS_SUBJECTS.length)]);
+            setDisplayStyle(ART_STYLES[Math.floor(Math.random() * ART_STYLES.length)]);
+            setDisplayMood(MOODS[Math.floor(Math.random() * MOODS.length)]);
+            spins++;
+            
+            if (spins >= maxSpins) {
+                clearInterval(spinInterval);
+                
+                // Final selection
+                const finalSubject = CHAOS_SUBJECTS[Math.floor(Math.random() * CHAOS_SUBJECTS.length)];
+                const finalStyle = ART_STYLES[Math.floor(Math.random() * ART_STYLES.length)];
+                const finalMood = MOODS[Math.floor(Math.random() * MOODS.length)];
+                
+                setDisplaySubject(finalSubject);
+                setDisplayStyle(finalStyle);
+                setDisplayMood(finalMood);
+                
+                setSubject(finalSubject);
+                setStyles([finalStyle]);
+                setMoods([finalMood]);
+                setComplexity('ULTRA-DETAILED');
+                
+                setTimeout(() => {
+                    setSpinning(false);
+                    handleGenerate(finalSubject, mode);
+                }, 800); // Wait almost 1 sec to let user read it before auto-generating
+            }
+        }, 100); // 100ms per frame
     };
 
     const handleGenerate = async (overrideSubject?: string, overrideMode?: 'prompt' | 'image') => {
@@ -158,6 +225,21 @@ export default function PromptGenerator() {
 
                 const data = await response.json();
                 setGeneratedImage(`data:image/jpeg;base64,${data.image_base64}`);
+
+                // Save to DB
+                try {
+                    await fetch(`${apiUrl}/history`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            prompt: fullPrompt,
+                            image_base64: `data:image/jpeg;base64,${data.image_base64}`
+                        })
+                    });
+                    fetchHistory(); // Refresh history
+                } catch (e) {
+                    console.error("Failed to save history", e);
+                }
             }
         } catch (err: unknown) {
             if (err instanceof Error) {
@@ -195,6 +277,150 @@ export default function PromptGenerator() {
         }
     };
 
+    const handleContinue = async () => {
+        if (!generatedImage) return;
+        setContinueLoading(true);
+        setError('');
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const response = await fetch(`${apiUrl}/continue`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    image_base64: generatedImage
+                }),
+            });
+            if (!response.ok) throw new Error('Failed to expand universe');
+            const data = await response.json();
+            
+            setPrompt(data.prompt);
+            setGeneratedImage(`data:image/jpeg;base64,${data.image_base64}`);
+            setCritique(''); // Clear old critique
+            
+            // Save new step to DB
+            try {
+                await fetch(`${apiUrl}/history`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: data.prompt,
+                        image_base64: `data:image/jpeg;base64,${data.image_base64}`
+                    })
+                });
+                fetchHistory(); // Refresh history
+            } catch (e) {
+                console.error("Failed to save history", e);
+            }
+        } catch (err: unknown) {
+            if (err instanceof Error) {
+                setError(err.message);
+            } else {
+                setError('Something went wrong.');
+            }
+        } finally {
+            setContinueLoading(false);
+        }
+    };
+
+    const handleMutate = async () => {
+        if (!generatedImage || !mutationPrompt.trim()) return;
+        setMutateLoading(true);
+        setError('');
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const response = await fetch(`${apiUrl}/mutate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    image_base64: generatedImage,
+                    mutation_prompt: mutationPrompt
+                }),
+            });
+            if (!response.ok) throw new Error('Failed to mutate image');
+            const data = await response.json();
+            
+            setMutatedImage(`data:image/jpeg;base64,${data.image_base64}`);
+            setPrompt(data.prompt);
+            setCritique('');
+            
+            // Save mutated step to DB
+            try {
+                await fetch(`${apiUrl}/history`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: data.prompt,
+                        image_base64: `data:image/jpeg;base64,${data.image_base64}`
+                    })
+                });
+                fetchHistory(); // Refresh history
+            } catch (e) {
+                console.error("Failed to save history", e);
+            }
+        } catch (err: unknown) {
+            if (err instanceof Error) {
+                setError(err.message);
+            } else {
+                setError('Something went wrong.');
+            }
+        } finally {
+            setMutateLoading(false);
+        }
+    };
+
+    const handleGenerateComic = async () => {
+        if (!comicStory.trim()) {
+            setError('Please provide a story for the comic.');
+            return;
+        }
+        setComicLoading(true);
+        setError('');
+        setComicPanels([]);
+        try {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+            const response = await fetch(`${apiUrl}/comic`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    story: comicStory
+                }),
+            });
+            if (!response.ok) throw new Error('Failed to generate comic');
+            const data = await response.json();
+            
+            const panels = data.panels.map((p: any) => ({
+                caption: p.caption,
+                image_base64: `data:image/jpeg;base64,${p.image_base64}`
+            }));
+            
+            setComicPanels(panels);
+            
+            // Optionally save the first panel to history as a representation
+            if (panels.length > 0) {
+                try {
+                    await fetch(`${apiUrl}/history`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            prompt: `Comic: ${panels[0].caption}`,
+                            image_base64: panels[0].image_base64
+                        })
+                    });
+                    fetchHistory();
+                } catch (e) {}
+            }
+            
+        } catch (err: unknown) {
+            if (err instanceof Error) {
+                setError(err.message);
+            } else {
+                setError('Something went wrong.');
+            }
+        } finally {
+            setComicLoading(false);
+        }
+    };
+
     const copyToClipboard = () => {
         navigator.clipboard.writeText(prompt);
         setCopied(true);
@@ -219,7 +445,27 @@ export default function PromptGenerator() {
                 <div className="w-16 h-[1px] bg-gold mx-auto opacity-50 mt-4"></div>
             </div>
 
-            {/* Mode Toggle */}
+            {/* App Mode Toggle */}
+            <div className="flex justify-center mb-2">
+                <div className="flex bg-black rounded-sm border border-gold/50 p-1 space-x-1 shadow-[0_0_15px_rgba(255,215,0,0.2)]">
+                    <button 
+                        onClick={() => setAppMode('prompt')} 
+                        className={`text-sm px-8 py-3 rounded-sm transition-all tracking-widest uppercase font-serif ${appMode === 'prompt' ? 'bg-gold text-black font-bold' : 'text-gold hover:bg-gold/10'}`}
+                    >
+                        🎨 Prompt Studio
+                    </button>
+                    <button 
+                        onClick={() => setAppMode('comic')} 
+                        className={`text-sm px-8 py-3 rounded-sm transition-all tracking-widest uppercase font-serif ${appMode === 'comic' ? 'bg-gold text-black font-bold' : 'text-gold hover:bg-gold/10'}`}
+                    >
+                        📖 Comic Creator
+                    </button>
+                </div>
+            </div>
+
+            {appMode === 'prompt' && (
+                <>
+                {/* Mode Toggle */}
             <div className="flex justify-center mb-6">
                 <div className="flex bg-accent rounded-sm border border-border p-1 space-x-1">
                     <button 
@@ -284,6 +530,27 @@ export default function PromptGenerator() {
                         ))}
                     </div>
 
+                    {/* SLOT MACHINE UI */}
+                    <div className={`transition-all duration-500 overflow-hidden ${spinning ? 'max-h-[500px] opacity-100 mb-6' : 'max-h-0 opacity-0 mb-0'}`}>
+                        <div className="bg-black border border-purple-500/50 rounded-sm p-6 shadow-[0_0_30px_rgba(168,85,247,0.2)]">
+                            <h3 className="text-center text-purple-400 font-sans tracking-[0.2em] uppercase text-xs mb-6 animate-pulse">🎰 Synthesizing Chaos 🎰</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                                <div className="bg-accent p-4 border border-border rounded-sm">
+                                    <p className="text-xs text-muted tracking-widest uppercase mb-2">Subject</p>
+                                    <p className="font-serif text-white truncate">{displaySubject}</p>
+                                </div>
+                                <div className="bg-accent p-4 border border-border rounded-sm">
+                                    <p className="text-xs text-muted tracking-widest uppercase mb-2">Style</p>
+                                    <p className="font-serif text-white truncate">{displayStyle}</p>
+                                </div>
+                                <div className="bg-accent p-4 border border-border rounded-sm">
+                                    <p className="text-xs text-muted tracking-widest uppercase mb-2">Mood</p>
+                                    <p className="font-serif text-white truncate">{displayMood}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="relative">
                         <textarea
                             value={subject}
@@ -336,11 +603,11 @@ export default function PromptGenerator() {
                     <div className="flex gap-4 w-full md:w-auto">
                         <button
                             onClick={handleChaos}
-                            disabled={loading}
-                            className="w-full md:w-48 border border-purple-500/50 hover:border-purple-500 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 disabled:opacity-50 px-6 py-3 font-medium text-sm tracking-wide rounded-sm transition-all flex justify-center items-center h-12 outline-none group"
+                            disabled={loading || spinning}
+                            className={`w-full md:w-48 border px-6 py-3 font-medium text-sm tracking-wide rounded-sm transition-all flex justify-center items-center h-12 outline-none group ${spinning ? 'border-purple-500 bg-purple-500/20 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.5)]' : 'border-purple-500/50 hover:border-purple-500 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 disabled:opacity-50'}`}
                             title="Randomize everything and generate!"
                         >
-                            <span className="group-hover:animate-spin mr-2">🎲</span> CHAOS ROULETTE
+                            <span className={`${spinning ? 'animate-spin' : 'group-hover:animate-spin'} mr-2`}>🎲</span> {spinning ? 'SPINNING...' : 'CHAOS ROULETTE'}
                         </button>
                         <button
                             onClick={() => handleGenerate()}
@@ -402,14 +669,65 @@ export default function PromptGenerator() {
             {mode === 'image' && generatedImage && (
                 <section className="bg-surface p-6 rounded-sm border border-gold/30 mt-4 text-center animate-fade-in">
                     <h2 className="text-xs tracking-widest uppercase text-gold mb-4 font-sans">Generated Image</h2>
-                    <div className="w-full max-w-2xl mx-auto rounded-sm overflow-hidden shadow-2xl border border-border bg-black min-h-[300px] flex items-center justify-center">
-                        <img src={generatedImage} alt="Generated Art" className="w-full h-auto object-contain" />
+                    <div className="w-full max-w-2xl mx-auto rounded-sm overflow-hidden shadow-2xl border border-border bg-black min-h-[300px] flex items-center justify-center relative select-none">
+                        {mutatedImage ? (
+                            <div className="relative w-full h-auto aspect-square overflow-hidden group">
+                                <img src={mutatedImage} alt="Mutated Art" className="absolute top-0 left-0 w-full h-full object-contain pointer-events-none" />
+                                <div 
+                                    className="absolute top-0 left-0 h-full overflow-hidden border-r-2 border-gold shadow-[2px_0_10px_rgba(255,215,0,0.5)] pointer-events-none"
+                                    style={{ width: `${sliderValue}%` }}
+                                >
+                                    <img src={generatedImage} alt="Original Art" className="absolute top-0 left-0 w-full h-full object-contain pointer-events-none" style={{ width: '100%', maxWidth: 'none', objectPosition: 'left' }} />
+                                </div>
+                                <input 
+                                    type="range" 
+                                    min="0" max="100" 
+                                    value={sliderValue} 
+                                    onChange={(e) => setSliderValue(Number(e.target.value))}
+                                    className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-10"
+                                />
+                                <div className="absolute top-4 left-4 bg-black/60 text-white text-[10px] px-2 py-1 rounded-sm uppercase tracking-widest pointer-events-none">Original</div>
+                                <div className="absolute top-4 right-4 bg-black/60 text-gold text-[10px] px-2 py-1 rounded-sm uppercase tracking-widest pointer-events-none">Mutated</div>
+                            </div>
+                        ) : (
+                            <img src={generatedImage} alt="Generated Art" className="w-full h-auto object-contain" />
+                        )}
+                    </div>
+                    
+                    <div className="mt-8 p-6 bg-black/30 border border-gold/20 rounded-sm">
+                        <h3 className="text-xs tracking-widest uppercase text-gold mb-4 font-sans">🧬 The Evolution Engine</h3>
+                        <div className="flex flex-col sm:flex-row items-center gap-4">
+                            <input
+                                type="text"
+                                value={mutationPrompt}
+                                onChange={(e) => setMutationPrompt(e.target.value)}
+                                placeholder="E.g., 'Make it cyberpunk', 'Add heavy rain'"
+                                className="flex-1 bg-accent text-white border border-border p-3 focus:ring-1 focus:ring-gold outline-none w-full"
+                            />
+                            <button
+                                onClick={handleMutate}
+                                disabled={mutateLoading || !mutationPrompt.trim()}
+                                className="w-full sm:w-auto px-6 py-3 bg-gold/10 border border-gold hover:bg-gold text-gold hover:text-black transition-all rounded-sm tracking-widest uppercase font-bold disabled:opacity-50"
+                            >
+                                {mutateLoading ? <span className="spinner w-4 h-4 rounded-full border-2 border-gold border-t-transparent"></span> : 'Mutate'}
+                            </button>
+                        </div>
+                    </div>
+                    <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
+                        <button 
+                            onClick={handleContinue}
+                            disabled={continueLoading}
+                            className="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-purple-900 to-indigo-900 border border-purple-500/50 text-purple-200 hover:text-white hover:border-purple-400 transition-all rounded-sm tracking-widest uppercase font-bold shadow-[0_0_20px_rgba(168,85,247,0.3)] disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                            {continueLoading ? <span className="spinner w-4 h-4 rounded-full border-2 border-purple-400 border-t-transparent"></span> : '🌌 Expand The Universe (What Happens Next?)'}
+                        </button>
                     </div>
                     <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
                         <button 
                             onClick={() => {
                                 setMode('prompt');
                                 setPrompt(''); // Clear current prompt result so it doesn't show old one
+                                setMutatedImage(null);
                             }} 
                             className="text-xs px-8 py-4 border border-gold/50 text-gold hover:text-white hover:border-gold transition-colors rounded-sm tracking-widest uppercase font-medium"
                         >
@@ -453,17 +771,81 @@ export default function PromptGenerator() {
                 </section>
             )}
 
-            {/* History */}
-            {mode === 'prompt' && history.length > 0 && (
-                <section className="mt-8 space-y-3">
-                    <h3 className="text-xs tracking-widest text-muted uppercase font-sans">Recent Prompts</h3>
-                    <div className="space-y-2">
-                        {history.map((h, i) => (
-                            <div key={i} className={`bg-surface p-4 border rounded-sm cursor-pointer transition-colors group ${prompt === h ? 'border-gold' : 'border-border hover:border-gray-500'}`} onClick={() => setPrompt(h)}>
-                                <p className={`font-mono text-xs truncate transition-colors ${prompt === h ? 'text-gold' : 'text-gray-400 group-hover:text-gray-300'}`}>{h}</p>
+            {/* 3D Metaverse Gallery */}
+            {mode === 'prompt' && dbHistory.length > 0 && (
+                <section className="mt-12">
+                    <h3 className="text-xs tracking-widest text-muted uppercase font-sans mb-6 text-center">🌌 The Metaverse Gallery 🌌</h3>
+                    <div className="columns-1 sm:columns-2 md:columns-3 gap-4 space-y-4">
+                        {dbHistory.map((item) => (
+                            <div key={item.id} className="relative group overflow-hidden rounded-sm border border-border bg-black break-inside-avoid">
+                                <img 
+                                    src={item.image_base64} 
+                                    alt={item.prompt} 
+                                    className="w-full h-auto object-cover transform group-hover:scale-105 transition-transform duration-700 ease-out"
+                                />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4">
+                                    <p className="text-white font-mono text-xs line-clamp-3 leading-relaxed">
+                                        {item.prompt}
+                                    </p>
+                                    <button 
+                                        onClick={() => {
+                                            setMode('image');
+                                            setPrompt(item.prompt);
+                                            setGeneratedImage(item.image_base64);
+                                        }}
+                                        className="mt-3 w-full bg-gold/20 text-gold border border-gold hover:bg-gold hover:text-black py-2 text-[10px] tracking-widest font-bold uppercase transition-colors rounded-sm"
+                                    >
+                                        View
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>
+                </section>
+            )}
+            </>
+            )}
+
+            {/* COMIC CREATOR UI */}
+            {appMode === 'comic' && (
+                <section className="bg-surface p-6 rounded-sm border border-border shadow-2xl animate-fade-in text-center">
+                    <h2 className="text-xs tracking-widest uppercase text-gold mb-6 font-sans">📖 The Comic Book Generator</h2>
+                    
+                    <textarea
+                        value={comicStory}
+                        onChange={(e) => setComicStory(e.target.value)}
+                        placeholder="Write a short story... (e.g. 'A detective investigates a murder on a space station...')"
+                        className="w-full bg-accent text-white border border-border p-4 h-32 focus:ring-1 focus:ring-gold focus:border-gold outline-none transition-all resize-none font-serif text-lg leading-relaxed rounded-sm mb-6"
+                    />
+
+                    <button
+                        onClick={handleGenerateComic}
+                        disabled={comicLoading}
+                        className="w-full md:w-64 mx-auto bg-gold hover:bg-yellow-600 disabled:opacity-50 disabled:hover:bg-gold text-black px-6 py-4 font-medium text-sm tracking-widest uppercase rounded-sm transition-all flex justify-center items-center outline-none shadow-[0_0_20px_rgba(255,215,0,0.3)] mb-12"
+                    >
+                        {comicLoading ? <span className="spinner w-5 h-5 rounded-full border-2 border-black border-t-transparent"></span> : 'GENERATE COMIC'}
+                    </button>
+
+                    {comicPanels.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-black p-4 border-4 border-black outline outline-2 outline-white rounded-sm shadow-2xl max-w-5xl mx-auto">
+                            {comicPanels.map((panel, idx) => (
+                                <div key={idx} className="relative bg-white p-2 border-2 border-black flex flex-col group">
+                                    <div className="overflow-hidden border border-black flex-1">
+                                        <img 
+                                            src={panel.image_base64} 
+                                            alt={panel.caption} 
+                                            className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700"
+                                        />
+                                    </div>
+                                    <div className="bg-white px-3 py-4 border-t-2 border-black mt-2 text-center min-h-[60px] flex items-center justify-center">
+                                        <p className="font-sans font-bold text-black text-sm uppercase tracking-wide leading-snug">
+                                            {panel.caption}
+                                        </p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </section>
             )}
         </div>
