@@ -78,7 +78,7 @@ export default function PromptGenerator() {
     const [loading, setLoading] = useState<boolean>(false);
     const [error, setError] = useState<string>('');
     const [copied, setCopied] = useState<boolean>(false);
-    const [history, setHistory] = useState<string[]>([]);
+
     
     // Critique State
     const [critique, setCritique] = useState<string>('');
@@ -202,10 +202,7 @@ export default function PromptGenerator() {
                 const data = await response.json();
                 setPrompt(data.prompt);
                 setModel(data.model);
-                setHistory(prev => {
-                    const newHistory = [data.prompt, ...prev];
-                    return newHistory.slice(0, 10);
-                });
+
             } else {
                 const fullPrompt = `${activeSubject}. Styles: ${styles.join(', ')}. Moods: ${moods.join(', ')}`;
                 const response = await fetch(`${apiUrl}/generate/image`, {
@@ -388,7 +385,7 @@ export default function PromptGenerator() {
             if (!response.ok) throw new Error('Failed to generate comic');
             const data = await response.json();
             
-            const panels = data.panels.map((p: any) => ({
+            const panels = data.panels.map((p: { caption: string, image_base64: string }) => ({
                 caption: p.caption,
                 image_base64: `data:image/jpeg;base64,${p.image_base64}`
             }));
@@ -407,7 +404,7 @@ export default function PromptGenerator() {
                         })
                     });
                     fetchHistory();
-                } catch (e) {}
+                } catch {}
             }
             
         } catch (err: unknown) {
